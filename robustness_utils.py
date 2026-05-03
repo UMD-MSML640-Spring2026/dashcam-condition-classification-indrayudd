@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,14 @@ def candidate_model_dirs() -> list[Path]:
     ]
 
 
+def candidate_training_notebooks() -> list[Path]:
+    root = project_root()
+    return [
+        root / "TrainTestEval.ipynb",
+        root / "drive" / "MyDrive" / "CV final project" / "TrainTestEval.ipynb",
+    ]
+
+
 def resolve_dataset_root() -> Path:
     for path in candidate_dataset_roots():
         if path.exists():
@@ -82,6 +91,7 @@ def resolve_model_dir() -> Path:
 DATASET_ROOT = resolve_dataset_root()
 MANIFEST_PATH = DATASET_ROOT / "manifest.csv"
 MODEL_DIR = resolve_model_dir()
+BEST_MODEL_PATH = MODEL_DIR / "train_plus_aug_best.pt"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -131,6 +141,9 @@ class CheckpointInfo:
     valid_exact_match_acc: float
     valid_joint_score: float
     valid_loss: float
+    test_exact_match_acc: float | None = None
+    test_joint_score: float | None = None
+    test_loss: float | None = None
 
 
 def efficientnet_transform() -> T.Compose:
@@ -234,17 +247,120 @@ def list_best_checkpoints(model_dir: Path = MODEL_DIR) -> list[CheckpointInfo]:
     return checkpoints
 
 
-def select_best_checkpoint(model_dir: Path = MODEL_DIR) -> CheckpointInfo:
+def _read_train_test_summary_block(notebook_path: Path) -> str:
+    notebook = json.loads(notebook_path.read_text())
+    for cell in reversed(notebook.get("cells", [])):
+        for output in cell.get("outputs", []):
+            data = output.get("data", {})
+            text_plain = data.get("text/plain")
+            if not text_plain:
+                continue
+            text = "".join(text_plain) if isinstance(text_plain, list) else str(text_plain)
+            if "corpus_name" in text and "joint_score" in text and "exact_match_acc" in text:
+                return text
+    raise ValueError(f"Could not find summary dataframe output in {notebook_path}")
+
+
+def load_observed_test_results(notebook_path: Path | None = None) -> dict[str, dict[str, float]]:
+    candidate_paths = [Path(notebook_path)] if notebook_path is not None else candidate_training_notebooks()
+    summary_text = None
+    for candidate in candidate_paths:
+        if candidate.exists():
+            try:
+                summary_text = _read_train_test_summary_block(candidate)
+                break
+            except ValueError:
+                continue
+    if summary_text is None:
+        raise FileNotFoundError("Could not locate an executed TrainTestEval.ipynb with summary outputs")
+
+    corpus_rows: dict[int, str] = {}
+    metric_rows: dict[int, dict[str, float]] = {}
+    known_corpuses = {"baseline_train", "train_plus_synth", "train_plus_aug", "train_plus_synth_plus_aug"}
+
+    for raw_line in summary_text.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        parts = line.split()
+        if not parts or not parts[0].isdigit():
+            continue
+        row_idx = int(parts[0])
+        if len(parts) >= 2 and parts[1] in known_corpuses:
+            corpus_rows[row_idx] = parts[1]
+            continue
+        if len(parts) >= 4 and parts[1].startswith("/"):
+            try:
+                metric_rows.setdefault(row_idx, {}).update(
+                    {
+                        "loss": float(parts[-2]),
+                        "road_loss": float(parts[-1]),
+                    }
+                )
+            except ValueError:
+                pass
+        if len(parts) >= 6:
+            try:
+                metric_rows.setdefault(row_idx, {}).update(
+                    {
+                        "visibility_loss": float(parts[1]),
+                        "road_acc": float(parts[2]),
+                        "visibility_acc": float(parts[3]),
+                        "joint_score": float(parts[4]),
+                        "exact_match_acc": float(parts[5]),
+                    }
+                )
+            except ValueError:
+                pass
+
+    results: dict[str, dict[str, float]] = {}
+    for row_idx, corpus_name in corpus_rows.items():
+        metrics = metric_rows.get(row_idx)
+        if metrics:
+            results[corpus_name] = metrics
+
+    if not results:
+        raise ValueError("Could not parse observed test results from TrainTestEval.ipynb")
+    return results
+
+
+def select_best_checkpoint(model_dir: Path = MODEL_DIR, notebook_path: Path | None = None) -> CheckpointInfo:
     checkpoints = list_best_checkpoints(model_dir)
-    return sorted(
-        checkpoints,
-        key=lambda item: (
-            -item.valid_exact_match_acc,
-            -item.valid_joint_score,
-            item.valid_loss,
-            item.path.name,
-        ),
-    )[0]
+    checkpoint_by_corpus = {checkpoint.corpus_name: checkpoint for checkpoint in checkpoints}
+
+    try:
+        observed_results = load_observed_test_results(notebook_path=notebook_path)
+        best_corpus, best_metrics = sorted(
+            observed_results.items(),
+            key=lambda entry: (
+                -entry[1]["exact_match_acc"],
+                -entry[1]["joint_score"],
+                entry[1].get("loss", float("inf")),
+                entry[0],
+            ),
+        )[0]
+        chosen = checkpoint_by_corpus[best_corpus]
+        return CheckpointInfo(
+            path=chosen.path,
+            corpus_name=chosen.corpus_name,
+            best_epoch=chosen.best_epoch,
+            valid_exact_match_acc=chosen.valid_exact_match_acc,
+            valid_joint_score=chosen.valid_joint_score,
+            valid_loss=chosen.valid_loss,
+            test_exact_match_acc=best_metrics.get("exact_match_acc"),
+            test_joint_score=best_metrics.get("joint_score"),
+            test_loss=best_metrics.get("loss"),
+        )
+    except Exception:
+        return sorted(
+            checkpoints,
+            key=lambda item: (
+                -item.valid_exact_match_acc,
+                -item.valid_joint_score,
+                item.valid_loss,
+                item.path.name,
+            ),
+        )[0]
 
 
 def load_checkpoint_model(checkpoint_path: Path | str) -> tuple[nn.Module, dict[str, Any]]:

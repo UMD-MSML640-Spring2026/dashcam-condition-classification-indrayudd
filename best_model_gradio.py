@@ -7,6 +7,7 @@ import pandas as pd
 from PIL import Image
 
 from robustness_utils import (
+    BEST_MODEL_PATH,
     COMBINED_CLASSES,
     DATASET_ROOT,
     MODEL_DIR,
@@ -14,13 +15,11 @@ from robustness_utils import (
     load_test_manifest,
     perturbation_config_from_controls,
     predict_single_image,
-    select_best_checkpoint,
     test_gallery_items,
 )
 
 
-BEST_CHECKPOINT = select_best_checkpoint(MODEL_DIR)
-MODEL, CHECKPOINT_PAYLOAD = load_checkpoint_model(BEST_CHECKPOINT.path)
+MODEL, CHECKPOINT_PAYLOAD = load_checkpoint_model(BEST_MODEL_PATH)
 TEST_FRAME = load_test_manifest(DATASET_ROOT)
 GALLERY_ITEMS = test_gallery_items(TEST_FRAME)
 
@@ -73,7 +72,7 @@ def _render(index: int, noise_percent: float, blur_percent: float, lighting_perc
     )
     result = predict_single_image(MODEL, image, perturbation=config)
     label = f"Image {index:02d} | true={row['road']} / {row['visibility']}"
-    return result["perturbed_image"], _prediction_markdown(result, row, BEST_CHECKPOINT.path), label, index
+    return result["perturbed_image"], _prediction_markdown(result, row, BEST_MODEL_PATH), label, index
 
 
 def _on_gallery_select(evt: gr.SelectData, noise_percent: float, blur_percent: float, lighting_percent: float, occlusion_percent: float):
@@ -91,8 +90,7 @@ with gr.Blocks(title="RWVC Best Model Inspector") as demo:
 
 **Dataset root:** `{DATASET_ROOT}`  
 **Checkpoint dir:** `{MODEL_DIR}`  
-**Selected best checkpoint:** `{BEST_CHECKPOINT.path.name}`  
-**Selection metric:** highest `valid_exact_match_acc`, then `valid_joint_score`, then lower `valid_loss`
+**BEST_MODEL_PATH:** `{BEST_MODEL_PATH}`
 """
     )
 
@@ -140,9 +138,6 @@ with gr.Blocks(title="RWVC Best Model Inspector") as demo:
 
 
 if __name__ == "__main__":
-    print(f"Using checkpoint: {BEST_CHECKPOINT.path}")
-    print(f"Checkpoint corpus: {BEST_CHECKPOINT.corpus_name}")
-    print(f"Best valid exact-match acc: {BEST_CHECKPOINT.valid_exact_match_acc:.4f}")
-    print(f"Best valid joint score: {BEST_CHECKPOINT.valid_joint_score:.4f}")
-    print(f"Best valid loss: {BEST_CHECKPOINT.valid_loss:.4f}")
+    print(f"Using checkpoint: {BEST_MODEL_PATH}")
+    print(f"Checkpoint corpus: {CHECKPOINT_PAYLOAD.get('corpus_name', 'unknown')}")
     demo.launch(share=True)
