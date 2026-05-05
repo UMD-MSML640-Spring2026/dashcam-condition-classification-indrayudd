@@ -127,6 +127,14 @@ Synthesis was done with the GPT-Image-1-mini model.
 - Joint Accuracy (0.5 for 1 correct label)
 - Exact Accuracy (0 for 1 wrong label)
 
+### Final Values
+| Corpus | Train Splits | Loss | Road Loss | Visibility Loss | Road Acc | Visibility Acc | Joint Score | Exact Match Acc |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline_train | train | 1.087889 | 0.730659 | 0.357230 | 0.70 | 0.86 | 0.78 | 0.58 |
+| train_plus_synth | train+train_synth | 1.019910 | 0.647868 | 0.372042 | 0.72 | 0.84 | 0.78 | 0.58 |
+| train_plus_aug | train+train_aug | 1.066748 | 0.682422 | 0.384326 | 0.74 | 0.86 | 0.80 | 0.62 |
+| train_plus_synth_plus_aug | train+train_synth+train_aug | 1.050961 | 0.661925 | 0.389036 | 0.70 | 0.84 | 0.77 | 0.56 |
+
 ### Training Curves
 
 ![Training Curves](artifacts/train_curves.png)
