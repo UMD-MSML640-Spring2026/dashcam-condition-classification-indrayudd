@@ -61,7 +61,7 @@ This dataset is relevant to real world applications like self drivinf cars that 
 
 There are 2 buckets: road condition with 3 classes and visibility condition with 2 classes. This means the dataset has 6 permutations of roads classified. Details for this are mentioned below.
 
-Synthesis was done with the GPT-Image-1 model.
+Synthesis was done with the GPT-Image-1-mini model.
 ### Split Sizes
 | Split | Images |
 | --- | ---: |
